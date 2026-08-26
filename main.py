@@ -1957,4 +1957,4 @@ def run_monitor():
 
     test_telegram()
 
-    while, True: # syntax check below
+    while True: # syntax check below
