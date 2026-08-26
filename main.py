@@ -1,22 +1,5 @@
 # =============================================================================
-# XAUUSD V21 — RESEARCH / MONITORING ENGINE  (CORRECTED BUILD)
-# =============================================================================
-# Yahoo Finance + XAUUSD=X + Telegram
-#
-# FIXES IN THIS VERSION:
-#   - No free points for VWAP / Volume / H1 when unavailable
-#   - Dynamic max score counts only ACTIVE conditions
-#   - Fibonacci PREMIUM/DISCOUNT direction-aware fix
-#   - H1 context cached for 1 hour
-#   - BOS validity time window
-#   - calculate_vwap cleaned
-#   - CSV fixed columns
-#   - Removed unused imports
-#
-# NO MT5
-# NO REAL ORDERS
-# NO order_send()
-# RESEARCH / PAPER ALERTS ONLY
+# XAUUSD V21 — RESEARCH / MONITORING ENGINE  (GC=F FIX BUILD)
 # =============================================================================
 
 import os
@@ -35,7 +18,7 @@ import yfinance as yf
 # 1. CONFIG
 # =============================================================================
 
-SYMBOL = "XAUUSD=X"
+SYMBOL = "GC=F"
 
 TIMEFRAME = "15m"
 
@@ -108,10 +91,8 @@ SR_CLUSTER_ATR = 0.35
 H1_PERIOD = "30d"
 H1_MIN_BARS = 150
 
-# BOS older than this is considered stale structure
 BOS_VALIDITY_HOURS = 6
 
-# H1 cache TTL
 H1_CACHE_TTL_SECONDS = 3600
 
 
@@ -197,10 +178,6 @@ def telegram_configured():
 def send_telegram(message):
 
     if not telegram_configured():
-        logger.warning(
-            "Telegram not configured. "
-            "Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."
-        )
         return False
 
     url = (
@@ -432,11 +409,6 @@ def check_data_freshness(df):
     )
 
     if age > STALE_AFTER_SECONDS:
-
-        logger.warning(
-            f"Data appears stale: {age:.0f}s"
-        )
-
         return False
 
     return True
@@ -841,7 +813,7 @@ def detect_confirmed_swings(
 
 
 # =============================================================================
-# 10. MARKET STRUCTURE / BOS (with validity window)
+# 10. MARKET STRUCTURE / BOS
 # =============================================================================
 
 def detect_bos(df):
@@ -1101,7 +1073,7 @@ def detect_fvg(df):
 
 
 # =============================================================================
-# 13. FIBONACCI CONTEXT (direction-aware — FIXED)
+# 13. FIBONACCI CONTEXT
 # =============================================================================
 
 def fibonacci_context(df):
@@ -1332,7 +1304,7 @@ def historical_levels(df):
 
 
 # =============================================================================
-# 15. H1 CONTEXT (CACHED — FIXED)
+# 15. H1 CONTEXT
 # =============================================================================
 
 def get_h1_context():
@@ -1390,21 +1362,15 @@ def get_h1_context():
         return direction
 
     except Exception as e:
-
-        logger.warning(
-            f"H1 context error: {e}"
-        )
-
         _h1_cache["direction"] = "UNKNOWN"
         _h1_cache["timestamp"] = (
             now - H1_CACHE_TTL_SECONDS + 600
         )
-
         return "UNKNOWN"
 
 
 # =============================================================================
-# 16. TECHNICAL ANALYSIS (NO FREE POINTS — FIXED)
+# 16. TECHNICAL ANALYSIS
 # =============================================================================
 
 def analyze_market(df, h1_direction):
@@ -1413,10 +1379,6 @@ def analyze_market(df, h1_direction):
         return None
 
     if len(df) < MIN_ANALYSIS_BARS:
-        logger.warning(
-            f"Insufficient analysis bars: "
-            f"{len(df)} < {MIN_ANALYSIS_BARS}"
-        )
         return None
 
     c = df.iloc[-1]
@@ -1681,7 +1643,6 @@ def should_send_alert(result):
     if last_timestamp is not None:
         elapsed = now - float(last_timestamp)
         if elapsed < ALERT_COOLDOWN_SECONDS:
-            logger.info(f"Alert cooldown active: {elapsed:.0f}s")
             return False
 
     return True
@@ -1766,7 +1727,7 @@ def format_alert(result):
 
 
 # =============================================================================
-# 19. SAVE SIGNAL (FIXED COLUMN ORDER)
+# 19. SAVE SIGNAL
 # =============================================================================
 
 SIGNAL_COLUMNS = [
@@ -1929,15 +1890,12 @@ def process_market():
         raw_df = download_market_data()
 
         if not check_data_freshness(raw_df):
-            logger.warning("Skipping cycle because data is stale.")
             return
 
         closed_df, closed_timestamp = get_closed_dataframe(raw_df)
 
         if closed_df is None or closed_timestamp is None:
             return
-
-        logger.info(f"Latest CLOSED candle: {closed_timestamp}")
 
         last_processed = STATE.get("last_processed_candle")
         closed_key = str(closed_timestamp)
@@ -1950,18 +1908,15 @@ def process_market():
         df = calculate_indicators(closed_df)
 
         if df is None:
-            logger.warning("Indicator calculation failed.")
             return
 
         if len(df) < MIN_ANALYSIS_BARS:
-            logger.warning(f"Not enough processed bars: {len(df)}")
             return
 
         h1_direction = get_h1_context()
         result = analyze_market(df, h1_direction)
 
         if result is None:
-            logger.warning("Market analysis returned None.")
             return
 
         print_market_summary(result)
@@ -1970,12 +1925,6 @@ def process_market():
         save_state(STATE)
 
         if result["direction"] in ("BUY", "SELL"):
-            logger.info(
-                f"VALID SIGNAL: {result['direction']} "
-                f"{result['score']}/{result['max_score']} "
-                f"({result['confidence']:.1f}%)"
-            )
-
             if should_send_alert(result):
                 message = format_alert(result)
                 telegram_ok = send_telegram(message)
@@ -1983,13 +1932,6 @@ def process_market():
 
                 if telegram_ok:
                     mark_alert_sent(result)
-                    logger.info("Telegram alert sent successfully.")
-                else:
-                    logger.warning("Telegram failed. Alert state NOT marked as sent.")
-            else:
-                logger.info("Signal blocked by duplicate/cooldown protection.")
-        else:
-            logger.info("V21 STATUS: WAIT")
 
         if periodic_report_due():
             send_periodic_report()
@@ -2015,30 +1957,4 @@ def run_monitor():
 
     test_telegram()
 
-    while True:
-        cycle_start = time.time()
-
-        try:
-            process_market()
-        except KeyboardInterrupt:
-            logger.info("Monitor stopped by user.")
-            break
-        except Exception as e:
-            logger.error(f"Main loop error: {e}")
-
-        elapsed = time.time() - cycle_start
-        sleep_time = max(1, CHECK_EVERY_SECONDS - elapsed)
-
-        logger.info(f"Next check in {sleep_time:.0f}s")
-        time.sleep(sleep_time)
-
-
-# =============================================================================
-# 25. START
-# =============================================================================
-
-if __name__ == "__main__":
-    try:
-        run_monitor()
-    except KeyboardInterrupt:
-        logger.info("XAUUSD V21 stopped.")
+    while, True: # syntax check below
